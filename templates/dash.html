@@ -1,0 +1,442 @@
+<!DOCTYPE html>
+<html lang="en" class="transition-colors duration-500">
+<head>
+  <meta charset="UTF-8" />
+  <title>📊 NSE Live Stock Dashboard</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    .fade-in { animation: fadeIn 0.8s ease-in-out; }
+    @keyframes fadeIn { from {opacity: 0;} to {opacity: 1;} }
+    .toggle-btn { transition: all 0.3s ease; }
+    canvas.spark { width: 80px !important; height: 40px !important; display:block; }
+    /* Floating panel */
+    .live-panel {
+      position: fixed;
+      right: 20px;
+      bottom: 20px;
+      width: 300px;
+      z-index: 60;
+      backdrop-filter: blur(6px);
+    }
+    .pulse {
+      animation: pulse 1s ease-in-out infinite;
+    }
+    @keyframes pulse {
+      0% { transform: translateY(0); }
+      50% { transform: translateY(-4px); }
+      100% { transform: translateY(0); }
+    }
+  </style>
+</head>
+<body class="bg-gray-50 dark:bg-gray-900 text-gray-800 dark:text-gray-200 min-h-screen">
+  <div class="max-w-7xl mx-auto p-6 fade-in">
+    <!-- Header -->
+    <div class="flex justify-between items-center mb-6">
+      <h1 class="text-4xl font-bold text-blue-700 dark:text-blue-400">📈 NSE Live Dashboard</h1>
+      <button id="themeToggle"
+        class="toggle-btn bg-gray-200 dark:bg-gray-700 p-2 rounded-full text-gray-800 dark:text-gray-100 shadow-md hover:scale-105">
+        🌞
+      </button>
+    </div>
+
+    <!-- Filters -->
+    <div class="flex flex-wrap justify-center gap-3 mb-6">
+      <input id="searchInput" type="text" placeholder="🔍 Search (e.g. RELIANCE)"
+        class="px-4 py-2 border rounded-lg shadow-sm focus:ring-2 focus:ring-blue-400 dark:bg-gray-800 dark:border-gray-700">
+      <input id="minPrice" type="number" placeholder="Min ₹"
+        class="px-4 py-2 border rounded-lg shadow-sm w-28 dark:bg-gray-800 dark:border-gray-700">
+      <input id="maxPrice" type="number" placeholder="Max ₹"
+        class="px-4 py-2 border rounded-lg shadow-sm w-28 dark:bg-gray-800 dark:border-gray-700">
+      <select id="filterSelect"
+        class="px-4 py-2 border rounded-lg shadow-sm bg-white dark:bg-gray-800 dark:border-gray-700">
+        <option value="">All Stocks</option>
+        <option value="gainers">Top Gainers</option>
+        <option value="losers">Top Losers</option>
+      </select>
+      <button onclick="applyFilters()" class="bg-blue-600 text-white px-5 py-2 rounded-lg hover:bg-blue-700">Apply</button>
+      <button onclick="resetFilters()" class="bg-gray-300 dark:bg-gray-700 text-black dark:text-gray-100 px-5 py-2 rounded-lg hover:bg-gray-400">Reset</button>
+    </div>
+
+    <!-- Summary Cards -->
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+      <div class="p-5 bg-green-50 dark:bg-green-900/20 border border-green-300 dark:border-green-700 rounded-xl shadow">
+        <h2 class="text-xl font-semibold text-green-700 dark:text-green-400 mb-3">🚀 Top Gainers</h2>
+        <ul id="topGainers" class="space-y-1 text-green-700 dark:text-green-300"></ul>
+      </div>
+      <div class="p-5 bg-red-50 dark:bg-red-900/20 border border-red-300 dark:border-red-700 rounded-xl shadow">
+        <h2 class="text-xl font-semibold text-red-700 dark:text-red-400 mb-3">📉 Top Losers</h2>
+        <ul id="topLosers" class="space-y-1 text-red-700 dark:text-red-300"></ul>
+      </div>
+    </div>
+
+    <!-- Table -->
+    <div class="overflow-x-auto bg-white dark:bg-gray-800 rounded-2xl shadow-xl">
+      <table class="min-w-full text-sm text-center">
+        <thead class="bg-blue-600 text-white uppercase">
+          <tr>
+            <th class="px-4 py-3">Symbol</th>
+            <th class="px-4 py-3">Price ₹</th>
+            <th class="px-4 py-3">Change ₹</th>
+            <th class="px-4 py-3">% Change</th>
+            <th class="px-4 py-3">Updated</th>
+            <th class="px-4 py-3">Trend</th>
+          </tr>
+        </thead>
+        <tbody id="stockTable" class="divide-y divide-gray-200 dark:divide-gray-700"></tbody>
+      </table>
+    </div>
+
+    <!-- Chart -->
+    <div class="mt-10 bg-white dark:bg-gray-800 p-6 rounded-xl shadow-md">
+      <h2 class="text-lg font-semibold mb-4 text-gray-700 dark:text-gray-300">📊 Live Market Sentiment</h2>
+      <canvas id="marketChart" height="100"></canvas>
+    </div>
+
+    <p id="updateTime" class="text-center text-gray-500 dark:text-gray-400 mt-6">Loading...</p>
+  </div>
+
+  <!-- Floating Live Market Summary Panel -->
+  <div class="live-panel">
+    <div id="livePanelCard" class="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-4 shadow-lg">
+      <div class="flex items-center justify-between">
+        <div>
+          <div class="text-sm text-gray-500 dark:text-gray-300">Live Market Summary</div>
+          <div id="panelTime" class="text-xs text-gray-400 dark:text-gray-500">—</div>
+        </div>
+        <div class="w-16 h-16 flex items-center justify-center">
+          <canvas id="miniSentiment" width="70" height="70"></canvas>
+        </div>
+      </div>
+
+      <div class="mt-3 grid grid-cols-3 gap-2 text-center">
+        <div>
+          <div class="text-sm text-green-600 dark:text-green-300 font-semibold" id="panelGainers">0</div>
+          <div class="text-xs text-gray-500 dark:text-gray-400">Gainers</div>
+        </div>
+        <div>
+          <div class="text-sm text-red-600 dark:text-red-300 font-semibold" id="panelLosers">0</div>
+          <div class="text-xs text-gray-500 dark:text-gray-400">Losers</div>
+        </div>
+        <div>
+          <div class="text-sm text-gray-700 dark:text-gray-200 font-semibold" id="panelNeutral">0</div>
+          <div class="text-xs text-gray-500 dark:text-gray-400">Neutral</div>
+        </div>
+      </div>
+
+      <div class="mt-3 flex items-center justify-between">
+        <div>
+          <div class="text-xs text-gray-500 dark:text-gray-400">Avg % Change</div>
+          <div id="panelAvg" class="text-lg font-semibold">0.00%</div>
+        </div>
+        <div>
+          <button id="miniRefresh" class="px-3 py-1 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700">Refresh</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+<!-- Floating Chat Toggle Button -->
+<button id="chatToggleBtn"
+  class="fixed left-6 bottom-6 w-14 h-14 bg-blue-600 text-white rounded-full shadow-xl flex items-center justify-center text-2xl hover:bg-blue-700 transition-all z-50">
+  🤖
+</button>
+
+<!-- AI Chatbot Panel (Hidden by Default) -->
+<div id="chatContainer"
+  class="fixed left-6 bottom-24 w-96 h-[500px] bg-white dark:bg-gray-800 border dark:border-gray-700 rounded-xl shadow-2xl flex flex-col transform scale-0 opacity-0 transition-all duration-300 origin-bottom-left z-50">
+
+  <!-- Header -->
+  <div class="bg-blue-600 text-white p-3 rounded-t-xl flex justify-between items-center">
+    <span class="font-semibold">🤖 NSE AI Assistant</span>
+    <button id="closeChat" class="text-white text-lg hover:opacity-80">✖</button>
+  </div>
+
+  <!-- Messages -->
+  <div id="chatMessages" class="flex-1 overflow-y-auto p-3 space-y-2 text-sm"></div>
+
+  <!-- Input -->
+  <div class="p-3 border-t dark:border-gray-700 flex gap-2">
+    <input id="chatInput" type="text" placeholder="Ask about any company..."
+      class="flex-1 px-3 py-2 rounded-lg border dark:bg-gray-700 dark:border-gray-600">
+    <button onclick="sendMessage()"
+      class="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700">
+      Send
+    </button>
+  </div>
+</div>
+
+
+  <script>
+    // Theme toggle
+    const themeToggle = document.getElementById("themeToggle");
+    const root = document.documentElement;
+    const userPref = localStorage.getItem("theme");
+    if (userPref === "dark" || (!userPref && window.matchMedia("(prefers-color-scheme: dark)").matches)) {
+      root.classList.add("dark");
+      themeToggle.textContent = "🌙";
+    }
+    themeToggle.addEventListener("click", () => {
+      root.classList.toggle("dark");
+      const isDark = root.classList.contains("dark");
+      themeToggle.textContent = isDark ? "🌙" : "🌞";
+      localStorage.setItem("theme", isDark ? "dark" : "light");
+      // redraw mini sentiment with proper legend color
+      if (miniChart) miniChart.options.plugins.legend.labels.color = root.classList.contains('dark') ? '#e5e7eb' : '#1f2937';
+      if (miniChart) miniChart.update();
+    });
+
+    let sparkCharts = {};
+    let mainChart;
+    let miniChart;
+
+    // loadData pulls data, renders table + sparklines + updates floating panel
+    async function loadData() {
+      const search = document.getElementById("searchInput").value.trim();
+      const filter = document.getElementById("filterSelect").value;
+      const minPrice = document.getElementById("minPrice").value;
+      const maxPrice = document.getElementById("maxPrice").value;
+      let url = `/api/quotes?`;
+      if (search) url += `search=${encodeURIComponent(search)}&`;
+      if (filter === "gainers") url += `gainers=true&`;
+      if (filter === "losers") url += `losers=true&`;
+      if (minPrice) url += `min_price=${minPrice}&`;
+      if (maxPrice) url += `max_price=${maxPrice}&`;
+
+      const res = await fetch(url);
+      const data = await res.json();
+
+      // table
+      const tbody = document.getElementById("stockTable");
+      tbody.innerHTML = "";
+      data.forEach(s => {
+        const color = s.pChange >= 0 ? "text-green-600 dark:text-green-400 font-semibold" : "text-red-600 dark:text-red-400 font-semibold";
+        const id = "spark_" + s.symbol;
+        tbody.innerHTML += `
+          <tr class="hover:bg-blue-50 dark:hover:bg-gray-700 transition">
+            <td class="py-2">${s.symbol}</td>
+            <td>${s.price ?? "-"}</td>
+            <td class="${color}">${s.change ?? "-"}</td>
+            <td class="${color}">${s.pChange ?? "-"}%</td>
+            <td>${s.timestamp ?? "-"}</td>
+            <td><canvas id="${id}" class="spark"></canvas></td>
+          </tr>`;
+      });
+
+      // render sparklines
+      data.forEach(s => renderSpark(s.symbol, s.history));
+
+      // top cards
+      const sorted = data.filter(s => s.pChange !== null && s.pChange !== undefined).sort((a,b)=>b.pChange - a.pChange);
+      document.getElementById("topGainers").innerHTML =
+        sorted.slice(0,5).map(s=>`<li>${s.symbol} (${s.pChange.toFixed(2)}%)</li>`).join("");
+      document.getElementById("topLosers").innerHTML =
+        sorted.slice(-5).reverse().map(s=>`<li>${s.symbol} (${s.pChange.toFixed(2)}%)</li>`).join("");
+
+      // main chart
+      updateMainChart(sorted);
+
+      // floating panel update
+      updateLivePanel(sorted);
+
+      document.getElementById("updateTime").textContent =
+        "🔄 Last updated: " + new Date().toLocaleTimeString();
+    }
+
+    // render mini sparkline for each row
+    function renderSpark(symbol, history) {
+      const el = document.getElementById("spark_" + symbol);
+      if (!el) return;
+      if (!history || history.length < 2) {
+        // clear previous if exists
+        if (sparkCharts[symbol]) { sparkCharts[symbol].destroy(); delete sparkCharts[symbol]; }
+        return;
+      }
+      if (sparkCharts[symbol]) sparkCharts[symbol].destroy();
+      sparkCharts[symbol] = new Chart(el, {
+        type: 'line',
+        data: {
+          labels: history.map((_, i) => i),
+          datasets: [{
+            data: history,
+            borderColor: history[history.length - 1] >= history[0] ? '#16a34a' : '#dc2626',
+            borderWidth: 1.3,
+            fill: false,
+            tension: 0.35,
+            pointRadius: 0
+          }]
+        },
+        options: {
+          responsive: false,
+          maintainAspectRatio: false,
+          scales: { x: { display: false }, y: { display: false } },
+          plugins: { legend: { display: false }, tooltip: { enabled: false } }
+        }
+      });
+    }
+
+    // main doughnut chart in page
+    function updateMainChart(stocks) {
+      const ctx = document.getElementById('marketChart');
+      const gainers = stocks.filter(s => s.pChange > 0).length;
+      const losers = stocks.filter(s => s.pChange < 0).length;
+      const neutral = stocks.length - gainers - losers;
+      const data = {
+        labels: ['Gainers', 'Losers', 'Neutral'],
+        datasets: [{
+          data: [gainers, losers, neutral],
+          backgroundColor: ['#22c55e', '#ef4444', '#94a3b8'],
+        }]
+      };
+      if (mainChart) mainChart.destroy();
+      mainChart = new Chart(ctx, {
+        type: 'doughnut',
+        data,
+        options: { plugins: { legend: { labels: { color: root.classList.contains('dark') ? '#e5e7eb' : '#1f2937' } } } }
+      });
+    }
+
+    // Floating panel update (counts + avg % + mini donut)
+    function updateLivePanel(stocks) {
+      const gainers = stocks.filter(s => s.pChange > 0).length;
+      const losers = stocks.filter(s => s.pChange < 0).length;
+      const neutral = stocks.length - gainers - losers;
+      const avg = stocks.length ? (stocks.reduce((acc, s) => acc + (s.pChange || 0), 0) / stocks.length) : 0;
+
+      // update numbers
+      const gEl = document.getElementById("panelGainers");
+      const lEl = document.getElementById("panelLosers");
+      const nEl = document.getElementById("panelNeutral");
+      const aEl = document.getElementById("panelAvg");
+      const timeEl = document.getElementById("panelTime");
+
+      gEl.textContent = gainers;
+      lEl.textContent = losers;
+      nEl.textContent = neutral;
+      aEl.textContent = avg.toFixed(2) + "%";
+      timeEl.textContent = new Date().toLocaleTimeString();
+
+      // add subtle pulse if avg magnitude > 0.5%
+      const card = document.getElementById("livePanelCard");
+      if (Math.abs(avg) > 0.5) {
+        card.classList.add("pulse");
+      } else {
+        card.classList.remove("pulse");
+      }
+
+      // mini donut inside panel (reuse Chart.js)
+      const miniCtx = document.getElementById('miniSentiment');
+      const data = {
+        labels: ['G', 'L', 'N'],
+        datasets: [{
+          data: [gainers, losers, neutral],
+          backgroundColor: ['#16a34a', '#ef4444', '#94a3b8']
+        }]
+      };
+      if (miniChart) miniChart.destroy();
+      miniChart = new Chart(miniCtx, {
+        type: 'doughnut',
+        data,
+        options: {
+          responsive: false,
+          maintainAspectRatio: false,
+          cutout: '70%',
+          plugins: { legend: { display: false }, tooltip: { enabled: false } }
+        }
+      });
+    }
+
+    // Apply / Reset
+    function applyFilters(){ loadData(); }
+    function resetFilters(){
+      document.getElementById("searchInput").value = "";
+      document.getElementById("minPrice").value = "";
+      document.getElementById("maxPrice").value = "";
+      document.getElementById("filterSelect").value = "";
+      loadData();
+    }
+
+    // Mini refresh (manual) button
+    document.getElementById("miniRefresh").addEventListener("click", () => {
+      loadData();
+      // quick visual feedback
+      const btn = document.getElementById("miniRefresh");
+      btn.classList.add("opacity-75");
+      setTimeout(()=>btn.classList.remove("opacity-75"), 350);
+    });
+
+    // initial load + interval
+    loadData();
+    setInterval(loadData, 15000);
+    async function sendMessage() {
+  const input = document.getElementById("chatInput");
+  const messagesDiv = document.getElementById("chatMessages");
+
+  const message = input.value.trim();
+  if (!message) return;
+
+  // User message
+  messagesDiv.innerHTML += `
+    <div class="text-right">
+      <span class="inline-block bg-blue-600 text-white px-3 py-2 rounded-lg">
+        ${message}
+      </span>
+    </div>
+  `;
+
+  input.value = "";
+  messagesDiv.scrollTop = messagesDiv.scrollHeight;
+
+  // Bot loading message
+  messagesDiv.innerHTML += `
+    <div id="botLoading">
+      <span class="inline-block bg-gray-200 dark:bg-gray-700 px-3 py-2 rounded-lg">
+        Thinking...
+      </span>
+    </div>
+  `;
+  messagesDiv.scrollTop = messagesDiv.scrollHeight;
+
+  const res = await fetch("/api/chat", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ message })
+  });
+
+  const data = await res.json();
+
+  document.getElementById("botLoading").remove();
+
+  messagesDiv.innerHTML += `
+    <div>
+      <span class="inline-block bg-gray-200 dark:bg-gray-700 px-3 py-2 rounded-lg">
+        ${data.reply}
+      </span>
+    </div>
+  `;
+
+  messagesDiv.scrollTop = messagesDiv.scrollHeight;
+}
+
+// Chat Toggle Logic
+const chatToggleBtn = document.getElementById("chatToggleBtn");
+const chatContainer = document.getElementById("chatContainer");
+const closeChat = document.getElementById("closeChat");
+
+function openChat() {
+  chatContainer.classList.remove("scale-0", "opacity-0");
+  chatContainer.classList.add("scale-100", "opacity-100");
+}
+
+function closeChatBox() {
+  chatContainer.classList.remove("scale-100", "opacity-100");
+  chatContainer.classList.add("scale-0", "opacity-0");
+}
+
+chatToggleBtn.addEventListener("click", openChat);
+closeChat.addEventListener("click", closeChatBox);
+
+
+  </script>
+</body>
+</html>
